@@ -1,219 +1,236 @@
+// main.kt
 import javafx.application.Application
 import javafx.application.Platform
+import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.Scene
-import javafx.scene.control.ComboBox
-import javafx.scene.control.Label
+import javafx.scene.control.*
 import javafx.scene.input.KeyCode
-import javafx.scene.layout.StackPane
-import javafx.scene.layout.VBox
+import javafx.scene.layout.*
+import javafx.scene.media.Media
+import javafx.scene.media.MediaPlayer
+import javafx.scene.media.MediaView
 import javafx.stage.Stage
-import java.util.EnumSet
-import kotlin.concurrent.fixedRateTimer
+import javafx.util.Duration
+import javafx.animation.KeyFrame
+import javafx.animation.Timeline
+import javafx.event.EventHandler
 
-class CounterStrafeTest : Application() {
+const val IDLE_VIDEO = "idle.mp4"
+const val MOVING_VIDEO = "moving.mp4"
 
-    private val MIN_HOLD_MS = 250.0
-    private val COUNTERSTRAFE_MS = 100.0
-    private val TIMEOUT_MS = 1000.0
+enum class State {
+    IDLE, HOLDING, WAITING_FOR_SWITCH, SUCCESS, FAIL
+}
 
-    private val allowedKeys = EnumSet.of(
-        KeyCode.W, KeyCode.A, KeyCode.S, KeyCode.D,
-        KeyCode.Q, KeyCode.E,
-        KeyCode.SHIFT, KeyCode.CONTROL
-    )
+class MainApp : Application() {
 
-    private var key1: KeyCode = KeyCode.A
-    private var key2: KeyCode = KeyCode.D
+    private lateinit var idlePlayer: MediaPlayer
+    private lateinit var movingPlayer: MediaPlayer
+    private lateinit var mediaView: MediaView
+    private lateinit var feedbackLabel: Label
 
-    private var activeStartKey: KeyCode? = null
-    private var activeCounterKey: KeyCode? = null
+    private var currentState = State.IDLE
+    private var key1 = KeyCode.A
+    private var key2 = KeyCode.D
 
-    private var keyPressedTime = 0L
-    private var keyReleasedTime = 0L
-    private var counterPressedTime = 0L
+    private var activeKey: KeyCode? = null
+    private var expectedSwitchKey: KeyCode? = null
 
-    private var startKeyDown = false
-    private var counterKeyDown = false
+    private var releaseTime = 0L
+    private var autoFailTimeline: Timeline? = null
 
-    private val resultLabel = Label("Waiting...")
-    private val timingLabel = Label("")
-
-    private var holdTimerStarted = false
-
-    private lateinit var key1Box: ComboBox<KeyCode>
-    private lateinit var key2Box: ComboBox<KeyCode>
+    private var passThresholdMs = 100
 
     override fun start(stage: Stage) {
+        val root = StackPane(Label("Loading..."))
+        val scene = Scene(root, 1000.0, 700.0)
 
-        key1Box = ComboBox<KeyCode>().apply {
-            items.addAll(allowedKeys)
+        stage.scene = scene
+        stage.show()
+
+        Platform.runLater {
+            preloadMedia {
+                root.children.setAll(buildUI(scene))
+            }
+        }
+    }
+
+    private fun preloadMedia(onDone: () -> Unit) {
+        idlePlayer = MediaPlayer(Media(javaClass.getResource(IDLE_VIDEO)!!.toExternalForm())).apply {
+            isMute = true
+            cycleCount = MediaPlayer.INDEFINITE
+        }
+        movingPlayer = MediaPlayer(Media(javaClass.getResource(MOVING_VIDEO)!!.toExternalForm())).apply {
+            isMute = true
+        }
+        onDone()
+    }
+
+    private fun setMuted(muted: Boolean) {
+        idlePlayer.isMute = muted
+        movingPlayer.isMute = muted
+    }
+
+    private fun buildUI(scene: Scene): BorderPane {
+
+        mediaView = MediaView(idlePlayer).apply {
+            isPreserveRatio = true
+            fitWidthProperty().bind(scene.widthProperty())
+            fitHeightProperty().bind(scene.heightProperty().multiply(0.75))
+        }
+
+        feedbackLabel = Label("").apply {
+            style = "-fx-font-size: 24px;"
+        }
+
+        val key1Box = ComboBox<KeyCode>().apply {
+            items.addAll(KeyCode.A, KeyCode.D, KeyCode.W, KeyCode.S)
             value = key1
-            setCellFactory {
-                object : javafx.scene.control.ListCell<KeyCode>() {
-                    override fun updateItem(item: KeyCode?, empty: Boolean) {
-                        super.updateItem(item, empty)
-                        text = item?.name ?: ""
-                        isDisable = item == key2
-                    }
-                }
-            }
-            setButtonCell(object : javafx.scene.control.ListCell<KeyCode>() {
-                override fun updateItem(item: KeyCode?, empty: Boolean) {
-                    super.updateItem(item, empty)
-                    text = item?.name ?: ""
-                }
-            })
-            setOnAction {
-                key1 = value
-                key2Box.items = key2Box.items
-            }
+            setOnAction { key1 = value }
         }
 
-        key2Box = ComboBox<KeyCode>().apply {
-            items.addAll(allowedKeys)
+        val key2Box = ComboBox<KeyCode>().apply {
+            items.addAll(KeyCode.A, KeyCode.D, KeyCode.W, KeyCode.S)
             value = key2
-            setCellFactory {
-                object : javafx.scene.control.ListCell<KeyCode>() {
-                    override fun updateItem(item: KeyCode?, empty: Boolean) {
-                        super.updateItem(item, empty)
-                        text = item?.name ?: ""
-                        isDisable = item == key1
-                    }
-                }
-            }
-            setButtonCell(object : javafx.scene.control.ListCell<KeyCode>() {
-                override fun updateItem(item: KeyCode?, empty: Boolean) {
-                    super.updateItem(item, empty)
-                    text = item?.name ?: ""
-                }
-            })
-            setOnAction {
-                key2 = value
-                key1Box.items = key1Box.items
-            }
+            setOnAction { key2 = value }
         }
 
-        val layout = VBox(
-            10.0,
-            Label("Key 1"), key1Box,
-            Label("Key 2"), key2Box,
-            resultLabel,
-            timingLabel
-        ).apply {
+        val keysBox = HBox(20.0, key1Box, key2Box).apply {
             alignment = Pos.CENTER
         }
 
-        val root = StackPane(layout)
-        val scene = Scene(root, 400.0, 300.0)
+        val muteToggle = ToggleButton("SOUND").apply {
+            isSelected = true
+            setMuted(true)
+            setOnAction {
+                val muted = isSelected
+                text = if (muted) "SOUND" else "MUTE"
+                setMuted(muted)
+            }
+        }
+
+        val msValueLabel = Label(passThresholdMs.toString()).apply {
+            style = "-fx-underline: true;"
+        }
+
+        val msSuffixLabel = Label("ms")
+
+        val msTextField = TextField().apply {
+            prefWidth = 60.0
+            textFormatter = TextFormatter<String> { change ->
+                if (change.controlNewText.matches(Regex("\\d*"))) change else null
+            }
+        }
+
+        lateinit var msBox: HBox
+
+        fun commitMsEdit() {
+            val parsed = msTextField.text.toIntOrNull() ?: passThresholdMs
+            passThresholdMs = parsed.coerceIn(10, 200)
+            msValueLabel.text = passThresholdMs.toString()
+            msBox.children.setAll(msValueLabel, msSuffixLabel)
+        }
+
+        msBox = HBox(6.0, msValueLabel, msSuffixLabel).apply {
+            alignment = Pos.CENTER
+        }
+
+        msValueLabel.setOnMouseClicked {
+            msTextField.text = passThresholdMs.toString()
+            msBox.children.setAll(msTextField, msSuffixLabel)
+            msTextField.requestFocus()
+            msTextField.selectAll()
+        }
+
+        msTextField.setOnAction {
+            commitMsEdit()
+        }
+
+        msTextField.focusedProperty().addListener { _, _, focused ->
+            if (!focused) commitMsEdit()
+        }
+
+        val bottomRow = HBox(30.0, keysBox, msBox, muteToggle).apply {
+            alignment = Pos.CENTER
+            padding = Insets(12.0)
+        }
+
+        val layout = BorderPane().apply {
+            top = StackPane(mediaView)
+            center = feedbackLabel
+            bottom = bottomRow
+        }
+
+        playIdle()
 
         scene.setOnKeyPressed { e ->
-            val now = System.nanoTime()
-
-            if (activeStartKey == null && (e.code == key1 || e.code == key2)) {
-                activeStartKey = e.code
-                activeCounterKey = if (e.code == key1) key2 else key1
-                startKeyDown = true
-                keyPressedTime = now
-                holdTimerStarted = true
-                resultLabel.text = "HOLDING $activeStartKey..."
-                startHoldTimer()
-                return@setOnKeyPressed
-            }
-
-            if (e.code == activeCounterKey && !counterKeyDown) {
-                counterKeyDown = true
-                counterPressedTime = now
-
-                if (startKeyDown) {
-                    val holdMs = (now - keyPressedTime) / 1_000_000.0
-                    sendResult("FAIL", "Overlap! Held $activeStartKey for ${"%.1f".format(holdMs)} ms")
-                } else if (keyReleasedTime != 0L) {
-                    val deltaMs = (counterPressedTime - keyReleasedTime) / 1_000_000.0
-                    val holdMs = (keyReleasedTime - keyPressedTime) / 1_000_000.0
-
-                    when {
-                        deltaMs > TIMEOUT_MS ->
-                            sendResult("FAIL", "Timeout! Took ${"%.1f".format(TIMEOUT_MS)} ms to switch")
-                        holdMs < MIN_HOLD_MS ->
-                            sendResult("FAIL", "Held $activeStartKey too short: ${"%.1f".format(holdMs)} ms")
-                        deltaMs <= COUNTERSTRAFE_MS ->
-                            sendResult("SUCCESS", "Held $activeStartKey ${"%.1f".format(holdMs)} ms, switched in ${"%.1f".format(deltaMs)} ms")
-                        else ->
-                            sendResult("FAIL", "Too slow! Held $activeStartKey ${"%.1f".format(holdMs)} ms, delay ${"%.1f".format(deltaMs)} ms")
-                    }
-                }
+            if (currentState == State.IDLE && (e.code == key1 || e.code == key2)) {
+                activeKey = e.code
+                expectedSwitchKey = if (e.code == key1) key2 else key1
+                currentState = State.HOLDING
+                playMoving()
+            } else if (currentState == State.WAITING_FOR_SWITCH && e.code == expectedSwitchKey) {
+                autoFailTimeline?.stop()
+                val deltaMs = System.currentTimeMillis() - releaseTime
+                evaluateCounterstrafe(deltaMs)
             }
         }
 
         scene.setOnKeyReleased { e ->
-            val now = System.nanoTime()
-
-            if (e.code == activeStartKey && startKeyDown) {
-                startKeyDown = false
-                keyReleasedTime = now
-                resultLabel.text = "SWITCH to $activeCounterKey!"
-            }
-
-            if (e.code == activeCounterKey && counterKeyDown) {
-                counterKeyDown = false
-                reset()
+            if (currentState == State.HOLDING && e.code == activeKey) {
+                releaseTime = System.currentTimeMillis()
+                currentState = State.WAITING_FOR_SWITCH
+                autoFailTimeline = Timeline(
+                    KeyFrame(
+                        Duration.seconds(1.0),
+                        EventHandler {
+                            if (currentState == State.WAITING_FOR_SWITCH) {
+                                evaluateCounterstrafe(1001)
+                            }
+                        }
+                    )
+                ).apply { play() }
             }
         }
 
-        stage.title = "Counterstrafe Trainer"
-        stage.scene = scene
-        stage.isResizable = true
-        stage.setOnCloseRequest {
-            Platform.exit()
-            System.exit(0)
-        }
-
-        stage.show()
+        return layout
     }
 
-    private fun startHoldTimer() {
-        fixedRateTimer("holdTimer", false, 0L, 16L) {
-            val now = System.nanoTime()
+    private fun evaluateCounterstrafe(deltaMs: Long) {
+        autoFailTimeline?.stop()
 
-            if (startKeyDown) {
-                val deltaMs = (now - keyPressedTime) / 1_000_000.0
-                Platform.runLater {
-                    timingLabel.text = "Holding $activeStartKey: ${"%.1f".format(deltaMs)} ms"
-                }
-            } else if (keyReleasedTime != 0L && !counterKeyDown) {
-                var delta = (now - keyReleasedTime) / 1_000_000.0
-                if (delta >= TIMEOUT_MS) {
-                    delta = TIMEOUT_MS
-                    Platform.runLater {
-                        timingLabel.text = "Time since release: ${"%.1f".format(delta)} ms"
-                        sendResult("FAIL", "Timeout! Took ${"%.1f".format(delta)} ms to switch")
-                    }
-                    cancel()
-                } else {
-                    Platform.runLater {
-                        timingLabel.text = "Time since release: ${"%.1f".format(delta)} ms"
-                    }
-                }
-            }
+        val success = deltaMs <= passThresholdMs
+        feedbackLabel.text =
+            if (success) "SUCCESS – ${deltaMs}ms" else "FAIL – ${deltaMs}ms"
 
-            if (!holdTimerStarted) cancel()
-        }
+        movingPlayer.pause()
+
+        Timeline(
+            KeyFrame(
+                Duration.seconds(if (success) 2.0 else 1.0),
+                EventHandler { playIdle() }
+            )
+        ).play()
     }
 
-    private fun sendResult(result: String, reason: String) {
-        resultLabel.text = result.also { timingLabel.text = reason }
-        reset()
+    private fun playIdle() {
+        currentState = State.IDLE
+        movingPlayer.pause()
+        idlePlayer.seek(Duration.ZERO)
+        mediaView.mediaPlayer = idlePlayer
+        idlePlayer.play()
+        feedbackLabel.text = ""
     }
 
-    private fun reset() {
-        keyPressedTime = 0L.also { keyReleasedTime = it; counterPressedTime = it }
-        startKeyDown = false.also { counterKeyDown = it; holdTimerStarted = it }
-        activeStartKey = null
-        activeCounterKey = null
+    private fun playMoving() {
+        idlePlayer.pause()
+        movingPlayer.seek(Duration.ZERO)
+        mediaView.mediaPlayer = movingPlayer
+        movingPlayer.play()
     }
 }
 
 fun main() {
-    Application.launch(CounterStrafeTest::class.java)
+    Application.launch(MainApp::class.java)
 }

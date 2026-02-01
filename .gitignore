@@ -21,6 +21,7 @@ out/
 .springBeans
 .sts4-cache
 bin/
+src/main/resources/*.mp4
 !**/src/main/**/bin/
 !**/src/test/**/bin/
 /nbproject/private/
