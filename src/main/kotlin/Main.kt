@@ -3,6 +3,7 @@ import javafx.animation.KeyFrame
 import javafx.animation.Timeline
 import javafx.application.Application
 import javafx.event.EventHandler
+import javafx.geometry.Insets
 import javafx.geometry.Pos
 import javafx.scene.Scene
 import javafx.scene.control.*
@@ -30,6 +31,8 @@ class Main : Application() {
     private var currentRound = 0
     private var totalScore = 0.0
     private val maxRounds = 10
+
+    private val highScores = ArrayList<Int>()
 
     private lateinit var idlePlayer: MediaPlayer
     private lateinit var movingPlayer: MediaPlayer
@@ -72,7 +75,7 @@ class Main : Application() {
             mediaView = MediaView()
         }
 
-        stage.title = "Counterstrafe Trainer"
+        stage.title = "Counterstrafe Game"
 
         mainScene = Scene(StackPane(), 900.0, 600.0)
         stage.scene = mainScene
@@ -97,7 +100,7 @@ class Main : Application() {
         mainScene.setOnKeyPressed(null)
         mainScene.setOnKeyReleased(null)
 
-        val titleLabel = Label("Counterstrafe Trainer").apply {
+        val titleLabel = Label("Test Your Counterstrafe Skill!").apply {
             font = Font.font("Arial", FontWeight.BOLD, 32.0)
             textFill = Color.WHITE
         }
@@ -211,10 +214,59 @@ class Main : Application() {
             }
         }
 
-        val root = VBox(30.0, titleLabel, settingsGrid, playButton).apply {
+        val centerVBox = VBox(30.0, titleLabel, settingsGrid, playButton).apply {
             alignment = Pos.CENTER
-            padding = javafx.geometry.Insets(20.0)
+            padding = Insets(20.0)
+        }
+
+        val leaderButton = Button("LEADERBOARD").apply {
+            font = Font.font("Arial", FontWeight.BOLD, 14.0)
+            setOnAction { showLeaderboard() }
+        }
+
+        val rootStack = StackPane(centerVBox, leaderButton).apply {
             style = "-fx-background-color: black;"
+            StackPane.setAlignment(leaderButton, Pos.BOTTOM_RIGHT)
+            StackPane.setMargin(leaderButton, Insets(20.0))
+        }
+
+        mainScene.root = rootStack
+    }
+
+    private fun showLeaderboard() {
+        val titleLabel = Label("Top 10 Scores").apply {
+            font = Font.font("Arial", FontWeight.BOLD, 32.0)
+            textFill = Color.WHITE
+        }
+
+        val listVBox = VBox(10.0).apply {
+            alignment = Pos.CENTER
+        }
+
+        if (highScores.isEmpty()) {
+            listVBox.children.add(Label("No scores recorded yet.").apply {
+                font = Font.font("Arial", 18.0)
+                textFill = Color.GRAY
+            })
+        } else {
+            highScores.forEachIndexed { index, score ->
+                val entry = Label("${index + 1}. $score").apply {
+                    font = Font.font("Arial", 20.0)
+                    textFill = Color.LIGHTGREEN
+                }
+                listVBox.children.add(entry)
+            }
+        }
+
+        val backButton = Button("BACK").apply {
+            font = Font.font("Arial", FontWeight.BOLD, 14.0)
+            setOnAction { showMenu() }
+        }
+
+        val root = VBox(40.0, titleLabel, listVBox, backButton).apply {
+            alignment = Pos.CENTER
+            style = "-fx-background-color: black;"
+            padding = Insets(20.0)
         }
 
         mainScene.root = root
@@ -241,7 +293,7 @@ class Main : Application() {
 
         val overlayBox = VBox(statusLabel).apply {
             alignment = Pos.TOP_CENTER
-            padding = javafx.geometry.Insets(20.0, 0.0, 0.0, 0.0)
+            padding = Insets(20.0, 0.0, 0.0, 0.0)
             isPickOnBounds = false
         }
 
@@ -386,12 +438,21 @@ class Main : Application() {
 
         mainScene.setOnKeyReleased(null)
 
+        val finalScoreInt = totalScore.toInt()
+
+        if (finalScoreInt >= 500) {
+            highScores.add(finalScoreInt)
+            highScores.sortDescending()
+            while (highScores.size > 10) {
+                highScores.removeAt(highScores.lastIndex)
+            }
+        }
+
         val gameOverLabel = Label("Training Complete").apply {
             font = Font.font("Arial", FontWeight.BOLD, 40.0)
             textFill = Color.WHITE
         }
 
-        val finalScoreInt = totalScore.toInt()
         val scoreLabel = Label("Final Score: $finalScoreInt / 1000").apply {
             font = Font.font("Arial", FontWeight.NORMAL, 28.0)
             style = if(finalScoreInt > 500) "-fx-text-fill: lightgreen;" else "-fx-text-fill: #ff6666;"
@@ -404,7 +465,7 @@ class Main : Application() {
 
         val instructLabel = Label("Press ENTER to return to Menu").apply {
             font = Font.font("Arial", FontWeight.BOLD, 14.0)
-            padding = javafx.geometry.Insets(40.0, 0.0, 0.0, 0.0)
+            padding = Insets(40.0, 0.0, 0.0, 0.0)
             textFill = Color.WHITE
         }
 
