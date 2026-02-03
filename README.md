@@ -1,5 +1,7 @@
 # **Valorant Counterstrafe Trainer**
 ### Written in Kotlin
 
-### How to build:
-Execute `./gradlew jpackage` in root directory
+### How to build JAR file:
+Open Gradle inside IntelliJ IDEA
+- Tasks → shadow → shadowJar
+  - JAR located in build/libs/

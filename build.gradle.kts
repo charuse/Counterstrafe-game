@@ -1,14 +1,20 @@
+// build.gradle.kts
 plugins {
-    kotlin("jvm") version "2.2.21"
+    kotlin("jvm") version "2.1.0"
     application
     id("org.openjfx.javafxplugin") version "0.1.0"
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
+group = "com.valorant"
+version = "1.0.0"
 
 repositories {
     mavenCentral()
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 javafx {
@@ -20,10 +26,13 @@ javafx {
     )
 }
 
-kotlin {
-    jvmToolchain(21)
+application {
+    mainClass.set("LauncherKt")
 }
 
-application {
-    mainClass.set("MainKt")
+tasks.shadowJar {
+    manifest {
+        attributes["Main-Class"] = "LauncherKt"
+    }
+    archiveClassifier.set("all")
 }
